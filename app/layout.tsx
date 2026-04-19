@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Steplet",
-  description: "AI-powered instructional animation platform",
+  title: "Steplet — PT Animations",
+  description:
+    "Turn any physical therapy prescription into animated step-by-step tutorials.",
 };
 
 export default function RootLayout({
@@ -13,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-gray-950 text-white antialiased">{children}</body>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
