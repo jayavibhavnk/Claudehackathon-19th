@@ -58,7 +58,7 @@ async function extractFromImageUrl(imageUrl: string, exerciseName: string): Prom
 
   try {
     const message = await client.messages.create({
-      model: 'claude-opus-4-5',
+      model: 'claude-opus-4-7',
       max_tokens: 2048,
       system: EXTRACTION_PROMPT,
       messages: [
@@ -102,7 +102,7 @@ async function generateFromName(exerciseName: string): Promise<PTExercise[]> {
 
   try {
     const message = await client.messages.create({
-      model: 'claude-opus-4-5',
+      model: 'claude-opus-4-7',
       max_tokens: 2048,
       system: EXTRACTION_PROMPT,
       messages: [
