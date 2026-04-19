@@ -1,37 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
 export async function POST(req: NextRequest) {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const { exercisePosition, repCount, formScore } = await req.json()
+  const apiKey = process.env.ANTHROPIC_API_KEY
 
-  const scoreLabel =
-    formScore >= 80 ? 'excellent' : formScore >= 60 ? 'good' : formScore >= 40 ? 'fair' : 'needs work'
+  if (!apiKey) return NextResponse.json({ feedback: '' })
+
+  const scoreLabel = formScore >= 80 ? 'excellent' : formScore >= 60 ? 'good' : formScore >= 40 ? 'fair' : 'needs work'
 
   const prompt = `You are a friendly physical therapy coach giving real-time audio feedback.
-Exercise position: ${exercisePosition}
-Reps completed so far: ${repCount}
-Current form score: ${formScore}/100 (${scoreLabel})
+Exercise: ${exercisePosition}, Reps done: ${repCount}, Form score: ${formScore}/100 (${scoreLabel})
 
-Give ONE short sentence of coaching feedback (under 15 words).
-- If score >= 80: praise the form and encourage continuing
-- If score 50-79: give one specific form cue to improve
-- If score < 50: give one gentle correction
-- Vary the language each call — don't always say the same thing
-- Sound warm and encouraging, not clinical
-Do NOT include any preamble, just the feedback sentence.`
+Give ONE short sentence of coaching (under 15 words). If score>=80 praise, if 50-79 give a form tip, if <50 give a gentle correction. Sound warm, vary your language.
+Return only the sentence, no preamble.`
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 60,
-      messages: [{ role: 'user', content: prompt }],
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 60,
+        messages: [{ role: 'user', content: prompt }],
+      }),
     })
-
-    const feedback = (response.content[0] as { type: string; text: string }).text.trim()
+    if (!res.ok) return NextResponse.json({ feedback: '' })
+    const data = await res.json() as { content: Array<{ type: string; text: string }> }
+    const feedback = data.content.filter(b => b.type === 'text').map(b => b.text).join('').trim()
     return NextResponse.json({ feedback })
   } catch {
     return NextResponse.json({ feedback: '' })

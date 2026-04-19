@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as path from "path";
 import { PTExerciseSchema, type PTExercise } from "../schemas/pt-exercise";
@@ -98,8 +97,6 @@ export async function extractPTExercises(
     };
   }
 
-  const client = new Anthropic({ apiKey });
-
   const ext = path.extname(imagePath).toLowerCase();
   const isPdf = ext === ".pdf";
   const imgMediaType = imageMediaType(ext);
@@ -137,26 +134,34 @@ export async function extractPTExercises(
   let rawResponse = "";
 
   try {
-    const message = await client.messages.create({
-      model: "claude-opus-4-7",
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: [
-            contentBlock,
-            {
-              type: "text",
-              text: "Extract all PT exercises from this document. Return valid JSON only.",
-            },
-          ],
-        },
-      ],
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: [
+              contentBlock,
+              { type: "text", text: "Extract all PT exercises from this document. Return valid JSON only." },
+            ],
+          },
+        ],
+      }),
     });
-
-    const textBlock = message.content.find((b) => b.type === "text");
-    rawResponse = textBlock?.type === "text" ? textBlock.text.trim() : "";
+    if (!res.ok) {
+      const errText = await res.text();
+      return { success: false, error: `API error: ${errText}`, rawResponse: "" };
+    }
+    const data = await res.json() as { content: Array<{ type: string; text: string }> };
+    rawResponse = data.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
 
     // Strip accidental code fences if the model adds them anyway
     const cleaned = rawResponse
@@ -320,8 +325,6 @@ export async function generateExerciseAnimation(
     return { success: false, error: "ANTHROPIC_API_KEY is not set", rawResponse: "" };
   }
 
-  const client = new Anthropic({ apiKey });
-
   const userPrompt = `Generate animation keyframes for this PT exercise:
 
 Name: ${exercise.name}
@@ -338,15 +341,26 @@ Produce the JSON animation object.`;
 
   let rawResponse = "";
   try {
-    const message = await client.messages.create({
-      model: "claude-opus-4-7",
-      max_tokens: 2048,
-      system: ANIMATION_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 2048,
+        system: ANIMATION_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
     });
-
-    const textBlock = message.content.find((b) => b.type === "text");
-    rawResponse = textBlock?.type === "text" ? textBlock.text.trim() : "";
+    if (!res.ok) {
+      const errText = await res.text();
+      return { success: false, error: `API error: ${errText}`, rawResponse: "" };
+    }
+    const data = await res.json() as { content: Array<{ type: string; text: string }> };
+    rawResponse = data.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
 
     const cleaned = rawResponse
       .replace(/^```(?:json)?\s*/i, "")

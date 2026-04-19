@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
+
 import { PTExerciseSchema, type PTExercise } from '@/lib/schemas/pt-exercise'
 import { ExerciseAnimationSchema, type ExerciseAnimationData } from '@/lib/schemas/pose'
-import { generateExerciseAnimation } from '@/lib/claude/extract-pt'
 
 const EXTRACTION_PROMPT = `You are a physical therapy exercise expert. Based on the exercise name provided, generate a complete PT exercise prescription in structured JSON.
 
@@ -29,10 +28,35 @@ Return ONLY valid JSON with this exact schema:
 
 Be specific with form cues — include 3-5 clear, practical instructions. Generate 1-3 exercises that make sense for the described exercise or body part.`
 
+async function anthropicCall(system: string, messages: string[], imageUrl?: string): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY!
+  const content: object[] = imageUrl
+    ? [{ type: 'image', source: { type: 'url', url: imageUrl } }, { type: 'text', text: messages[0] }]
+    : [{ type: 'text', text: messages[0] }]
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
+      system,
+      messages: [{ role: 'user', content }],
+    }),
+  })
+
+  if (!res.ok) throw new Error(await res.text())
+  const data = await res.json() as { content: Array<{ type: string; text: string }> }
+  return data.content.filter(b => b.type === 'text').map(b => b.text).join('')
+}
+
 async function searchTavilyImages(query: string): Promise<string[]> {
   const apiKey = process.env.TAVILY_API_KEY
   if (!apiKey) return []
-
   try {
     const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
@@ -53,74 +77,10 @@ async function searchTavilyImages(query: string): Promise<string[]> {
   }
 }
 
-async function extractFromImageUrl(imageUrl: string, exerciseName: string): Promise<PTExercise[] | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return null
-
-  const client = new Anthropic({ apiKey })
-
+function parseExercises(raw: string): PTExercise[] {
   try {
-    const message = await client.messages.create({
-      model: 'claude-opus-4-7',
-      max_tokens: 2048,
-      system: EXTRACTION_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'url', url: imageUrl },
-            },
-            {
-              type: 'text',
-              text: `Extract PT exercise details for: "${exerciseName}". Return JSON only.`,
-            },
-          ],
-        },
-      ],
-    })
-
-    const textBlock = message.content.find(b => b.type === 'text')
-    const raw = textBlock?.type === 'text' ? textBlock.text.trim() : ''
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
     const parsed = JSON.parse(cleaned)
-
-    const exercises: PTExercise[] = []
-    for (const item of parsed.exercises ?? []) {
-      const r = PTExerciseSchema.safeParse(item)
-      if (r.success) exercises.push(r.data)
-    }
-    return exercises.length > 0 ? exercises : null
-  } catch {
-    return null
-  }
-}
-
-async function generateFromName(exerciseName: string): Promise<PTExercise[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return []
-
-  const client = new Anthropic({ apiKey })
-
-  try {
-    const message = await client.messages.create({
-      model: 'claude-opus-4-7',
-      max_tokens: 2048,
-      system: EXTRACTION_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `Generate a PT exercise prescription for: "${exerciseName}". Return JSON only.`,
-        },
-      ],
-    })
-
-    const textBlock = message.content.find(b => b.type === 'text')
-    const raw = textBlock?.type === 'text' ? textBlock.text.trim() : ''
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-    const parsed = JSON.parse(cleaned)
-
     const exercises: PTExercise[] = []
     for (const item of parsed.exercises ?? []) {
       const r = PTExerciseSchema.safeParse(item)
@@ -132,42 +92,64 @@ async function generateFromName(exerciseName: string): Promise<PTExercise[]> {
   }
 }
 
+async function generateAnimation(exercise: PTExercise): Promise<ExerciseAnimationData | null> {
+  const ANIM_SYSTEM = `You are a physical therapy animation keyframe generator. Given a PT exercise, output JSON animation keyframes for a stick figure skeleton.
+
+Output schema (valid JSON only, no prose, no code fences):
+{
+  "keyframes": [
+    { "time": 0, "pose": { "root_x": 400, "root_y": 290 } },
+    { "time": 0.5, "pose": { "root_x": 400, "root_y": 290 } },
+    { "time": 1, "pose": { "root_x": 400, "root_y": 290 } }
+  ],
+  "label": "<Exercise name>",
+  "highlightParts": ["<muscle: hamstring|quad|calf|glute|hip_flexor|knee|shoulder|bicep|tricep|back|core|chest>"],
+  "supportObject": <"chair"|"bench"|"floor"|"wall"|null>
+}
+
+Rules: 3-5 keyframes, first and last identical for seamless loop. Only include joints that change. root_y: 290 standing, 355 seated.`
+
+  const prompt = `Generate animation for: ${exercise.name} (${exercise.position}, ${exercise.primary_body_parts.join(', ')}). Form cues: ${exercise.form_cues.slice(0, 3).join('; ')}`
+
+  try {
+    const raw = await anthropicCall(ANIM_SYSTEM, [prompt])
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    const result = ExerciseAnimationSchema.safeParse(JSON.parse(cleaned))
+    return result.success ? result.data : null
+  } catch {
+    return null
+  }
+}
+
 export async function POST(req: NextRequest) {
   const { query } = await req.json()
+  if (!query?.trim()) return NextResponse.json({ error: 'No query provided' }, { status: 400 })
 
-  if (!query?.trim()) {
-    return NextResponse.json({ error: 'No query provided' }, { status: 400 })
-  }
-
-  // Try Tavily image search → Claude vision first
+  // Try Tavily images → Claude vision, fallback to text generation
   const imageUrls = await searchTavilyImages(query)
   let exercises: PTExercise[] = []
 
   for (const url of imageUrls) {
-    const result = await extractFromImageUrl(url, query)
-    if (result && result.length > 0) {
-      exercises = result
-      break
-    }
+    try {
+      const raw = await anthropicCall(EXTRACTION_PROMPT, [`Extract PT exercises for: "${query}". JSON only.`], url)
+      exercises = parseExercises(raw)
+      if (exercises.length > 0) break
+    } catch { /* try next image */ }
   }
 
-  // Fall back to text-only generation
   if (exercises.length === 0) {
-    exercises = await generateFromName(query)
+    try {
+      const raw = await anthropicCall(EXTRACTION_PROMPT, [`Generate PT exercise prescription for: "${query}". JSON only.`])
+      exercises = parseExercises(raw)
+    } catch { /* fall through */ }
   }
 
   if (exercises.length === 0) {
     return NextResponse.json({ error: 'Could not find exercises for that query' }, { status: 404 })
   }
 
-  // Generate animations in parallel
-  const animationResults = await Promise.all(exercises.map(e => generateExerciseAnimation(e)))
-
-  const result = exercises.map((exercise, i) => ({
-    exercise,
-    animation: animationResults[i].success ? animationResults[i].animation : null,
-    animationError: animationResults[i].success ? undefined : animationResults[i].error,
-  }))
+  const animations = await Promise.all(exercises.map(e => generateAnimation(e)))
+  const result = exercises.map((exercise, i) => ({ exercise, animation: animations[i] }))
 
   return NextResponse.json({ exercises: result })
 }
