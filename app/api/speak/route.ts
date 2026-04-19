@@ -1,5 +1,8 @@
 import { NextRequest } from 'next/server'
 
+export const runtime = 'nodejs'
+export const maxDuration = 30
+
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY
 const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'
 

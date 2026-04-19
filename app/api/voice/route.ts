@@ -2,6 +2,9 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest } from 'next/server'
 import type { PTExercise } from '@/lib/schemas/pt-exercise'
 
+export const runtime = 'nodejs'
+export const maxDuration = 30
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 function buildSystemPrompt(session: SessionContext | null): string {
