@@ -74,9 +74,8 @@ export type ExtractionFailure = {
 export type ExtractionResult = ExtractionSuccess | ExtractionFailure;
 
 function imageMediaType(
-  filePath: string
-): "image/jpeg" | "image/png" | "image/gif" | "image/webp" {
-  const ext = path.extname(filePath).toLowerCase();
+  ext: string
+): "image/jpeg" | "image/png" | "image/gif" | "image/webp" | null {
   const map: Record<string, "image/jpeg" | "image/png" | "image/gif" | "image/webp"> = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -84,12 +83,7 @@ function imageMediaType(
     ".gif": "image/gif",
     ".webp": "image/webp",
   };
-  if (!map[ext]) {
-    throw new Error(
-      `Unsupported image type: ${ext}. Use .jpg, .jpeg, .png, .gif, or .webp`
-    );
-  }
-  return map[ext];
+  return map[ext] ?? null;
 }
 
 export async function extractPTExercises(
@@ -106,20 +100,39 @@ export async function extractPTExercises(
 
   const client = new Anthropic({ apiKey });
 
-  let imageData: string;
-  let mediaType: ReturnType<typeof imageMediaType>;
+  const ext = path.extname(imagePath).toLowerCase();
+  const isPdf = ext === ".pdf";
+  const imgMediaType = imageMediaType(ext);
 
-  try {
-    const buffer = fs.readFileSync(imagePath);
-    imageData = buffer.toString("base64");
-    mediaType = imageMediaType(imagePath);
-  } catch (err) {
+  if (!isPdf && !imgMediaType) {
     return {
       success: false,
-      error: `Failed to read image file: ${err instanceof Error ? err.message : String(err)}`,
+      error: `Unsupported file type: ${ext}. Use .pdf, .jpg, .jpeg, .png, .gif, or .webp`,
       rawResponse: "",
     };
   }
+
+  let fileData: string;
+  try {
+    fileData = fs.readFileSync(imagePath).toString("base64");
+  } catch (err) {
+    return {
+      success: false,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`,
+      rawResponse: "",
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contentBlock: any = isPdf
+    ? {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: fileData },
+      }
+    : {
+        type: "image",
+        source: { type: "base64", media_type: imgMediaType, data: fileData },
+      };
 
   let rawResponse = "";
 
@@ -132,17 +145,10 @@ export async function extractPTExercises(
         {
           role: "user",
           content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: mediaType,
-                data: imageData,
-              },
-            },
+            contentBlock,
             {
               type: "text",
-              text: "Extract all PT exercises from this image. Return valid JSON only.",
+              text: "Extract all PT exercises from this document. Return valid JSON only.",
             },
           ],
         },

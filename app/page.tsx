@@ -141,6 +141,7 @@ export default function Home() {
         onRestart={agent.restartSession}
         onExit={agent.goToBrowse}
         onStartListening={agent.startListening}
+        speakFn={agent.speakText}
       />
     )
   }

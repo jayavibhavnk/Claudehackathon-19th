@@ -1,16 +1,59 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import { usePose } from '@/hooks/usePose'
+import { usePoseAnalysis } from '@/hooks/usePoseAnalysis'
 
 interface PoseCameraProps {
   enabled: boolean
   className?: string
+  exercisePosition?: string
+  onRepComplete?: (count: number) => void
+  speakFn?: (text: string) => void
 }
 
-export function PoseCamera({ enabled, className = '' }: PoseCameraProps) {
-  const { videoRef, canvasRef, ready, cameraError } = usePose(enabled)
+export function PoseCamera({
+  enabled,
+  className = '',
+  exercisePosition = 'standing',
+  onRepComplete,
+  speakFn,
+}: PoseCameraProps) {
+  const { videoRef, canvasRef, ready, poseResult, cameraError, setDrawOptions } = usePose(enabled)
+  const [displayMetrics, setDisplayMetrics] = useState({ repCount: 0, formScore: 50, feedbackText: '' })
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const onFeedback = (text: string) => {
+    setDisplayMetrics(prev => ({ ...prev, feedbackText: text }))
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current)
+    feedbackTimerRef.current = setTimeout(() => {
+      setDisplayMetrics(prev => ({ ...prev, feedbackText: '' }))
+    }, 5000)
+  }
+
+  const onRep = (count: number) => {
+    setDisplayMetrics(prev => ({ ...prev, repCount: count }))
+    onRepComplete?.(count)
+  }
+
+  const { getMetrics } = usePoseAnalysis(poseResult, {
+    exercisePosition,
+    onRepComplete: onRep,
+    onFeedback,
+    speakFn,
+  })
+
+  // Sync joint colors to canvas draw options
+  useEffect(() => {
+    const metrics = getMetrics()
+    setDisplayMetrics(prev => ({ ...prev, formScore: metrics.formScore }))
+    setDrawOptions({ jointStatus: metrics.jointStatus })
+  }, [poseResult, getMetrics, setDrawOptions])
 
   if (!enabled) return null
+
+  const { repCount, formScore, feedbackText } = displayMetrics
+  const scoreColor = formScore >= 80 ? '#4ade80' : formScore >= 60 ? '#fbbf24' : '#f87171'
 
   return (
     <div className={`relative rounded-2xl overflow-hidden bg-gray-900 ${className}`}>
@@ -23,7 +66,7 @@ export function PoseCamera({ enabled, className = '' }: PoseCameraProps) {
         autoPlay
       />
 
-      {/* Pose overlay — mirror flip too */}
+      {/* Pose skeleton overlay */}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full scale-x-[-1]"
@@ -53,18 +96,40 @@ export function PoseCamera({ enabled, className = '' }: PoseCameraProps) {
         </div>
       )}
 
-      {/* Live badge */}
       {ready && (
-        <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-2.5 py-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-[10px] font-semibold text-white tracking-wide uppercase">Live</span>
-        </div>
+        <>
+          {/* Live badge */}
+          <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-[10px] font-semibold text-white tracking-wide uppercase">Live</span>
+          </div>
+
+          {/* Rep counter */}
+          <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm rounded-xl px-3 py-1.5 flex flex-col items-center">
+            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Reps</span>
+            <span className="text-2xl font-bold text-white leading-none">{repCount}</span>
+          </div>
+
+          {/* Form score bar */}
+          <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm px-3 py-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Form</span>
+              <span className="text-[10px] font-bold" style={{ color: scoreColor }}>{formScore}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${formScore}%`, background: scoreColor }}
+              />
+            </div>
+          </div>
+        </>
       )}
 
-      {/* Pose label */}
-      {ready && (
-        <div className="absolute bottom-3 left-3 bg-black/50 backdrop-blur-sm rounded-full px-2.5 py-1">
-          <span className="text-[10px] font-medium text-indigo-300 tracking-wide">Pose tracking active</span>
+      {/* Feedback bubble */}
+      {feedbackText && ready && (
+        <div className="absolute bottom-14 left-3 right-3 bg-black/70 backdrop-blur-sm border border-white/10 rounded-xl px-3 py-2 animate-fade-in-up">
+          <p className="text-xs text-white leading-relaxed">{feedbackText}</p>
         </div>
       )}
     </div>

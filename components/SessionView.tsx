@@ -5,10 +5,10 @@ import { useState } from 'react'
 import type { ExerciseResult, SessionMode, VoiceState } from '@/hooks/useVoiceAgent'
 import { VoiceOrb } from '@/components/VoiceOrb'
 import { PoseCamera } from '@/components/PoseCamera'
+import { ExerciseAnimation } from '@/remotion/compositions/ExerciseAnimation'
 import type { ExerciseAnimationData } from '@/lib/schemas/pose'
 import { DEMO_ANIMATIONS } from '@/lib/demoFallback'
 import type { PTExercise } from '@/lib/schemas/pt-exercise'
-
 
 const Player = dynamic(
   () => import('@remotion/player').then(m => ({ default: m.Player })),
@@ -20,9 +20,6 @@ function RemotionPlayer({ animData, exerciseName, idx }: {
   exerciseName: string
   idx: number
 }) {
-  // Lazy-require avoids SSR issues with Remotion internals
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { ExerciseAnimation } = require('@/remotion/compositions/ExerciseAnimation')
   const inputProps = {
     keyframes: animData.keyframes,
     durationSeconds: 3,
@@ -62,6 +59,7 @@ interface SessionViewProps {
   onRestart: () => void
   onExit: () => void
   onStartListening: () => void
+  speakFn?: (text: string) => void
 }
 
 export function SessionView({
@@ -77,6 +75,7 @@ export function SessionView({
   onRestart,
   onExit,
   onStartListening,
+  speakFn,
 }: SessionViewProps) {
   const [cameraEnabled, setCameraEnabled] = useState(false)
   const current = exercises[currentIdx]
@@ -204,7 +203,12 @@ export function SessionView({
             </button>
           ) : (
             <div className="relative" style={{ aspectRatio: '4/3' }}>
-              <PoseCamera enabled={cameraEnabled} className="w-full h-full" />
+              <PoseCamera
+                enabled={cameraEnabled}
+                className="w-full h-full"
+                exercisePosition={exercise.position}
+                speakFn={speakFn}
+              />
               <button
                 onClick={() => setCameraEnabled(false)}
                 className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-xs text-gray-300 hover:text-white px-2.5 py-1 rounded-full transition-colors"

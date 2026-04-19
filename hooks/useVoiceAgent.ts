@@ -419,5 +419,6 @@ export function useVoiceAgent() {
     restartSession,
     goToBrowse,
     loadExercises,
+    speakText,
   }
 }
