@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { extractPTExercises } from "@/lib/claude/extract-pt";
 import { generateExerciseAnimation } from "@/lib/claude/extract-pt";
+import { findDemoKey } from "@/lib/demo-library/shoulder-demos";
 
 export const maxDuration = 120; // Vercel function timeout (seconds)
 
@@ -52,9 +53,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Step 2: Generate animations in parallel (one Claude call per exercise)
+    // Step 2: Generate animations — use hardcoded demo if name matches, else Claude
     const results = await Promise.all(
       extractResult.exercises.map(async (exercise) => {
+        const demoKey = findDemoKey(exercise.name);
+        if (demoKey) {
+          return { exercise, animation: null, demoKey };
+        }
         const animResult = await generateExerciseAnimation(exercise);
         return {
           exercise,

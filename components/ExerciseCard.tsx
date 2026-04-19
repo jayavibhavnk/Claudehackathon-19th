@@ -6,6 +6,8 @@ import type { PlayerRef } from "@remotion/player";
 import type { PTExercise } from "@/lib/schemas/pt-exercise";
 import type { ExerciseAnimationData } from "@/lib/schemas/pose";
 import { ExerciseAnimation } from "@/remotion/compositions/ExerciseAnimation";
+import { ShoulderAnimation } from "@/remotion/compositions/ShoulderAnimation";
+import { demoExerciseMap } from "@/lib/demo-library/shoulder-demos";
 import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 
 const Player = dynamic(
@@ -46,9 +48,10 @@ function buildSpeechText(ex: PTExercise): string {
 type Props = {
   exercise: PTExercise;
   animation: ExerciseAnimationData | null;
+  demoKey?: string | null;
 };
 
-export function ExerciseCard({ exercise, animation }: Props) {
+export function ExerciseCard({ exercise, animation, demoKey }: Props) {
   const playerRef = useRef<PlayerRef | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -87,7 +90,19 @@ export function ExerciseCard({ exercise, animation }: Props) {
 
   const positionLabel = POSITION_LABELS[exercise.position] ?? "";
 
-  const inputProps = animation
+  const demoEntry = demoKey ? demoExerciseMap[demoKey] : null;
+
+  const inputProps = demoEntry
+    ? {
+        keyframes: demoEntry.keyframes,
+        durationSeconds: 6,
+        label: "",
+        highlightParts: demoEntry.highlightParts,
+        supportObject: demoEntry.supportObject,
+        heldObject: demoEntry.heldObject,
+        accent: "#4F46E5",
+      }
+    : animation
     ? {
         keyframes: animation.keyframes,
         durationSeconds: 6,
@@ -97,6 +112,8 @@ export function ExerciseCard({ exercise, animation }: Props) {
         accent: "#4F46E5",
       }
     : null;
+
+  const animationComponent = demoEntry ? ShoulderAnimation : ExerciseAnimation;
 
   const hasStat =
     exercise.reps !== null ||
@@ -112,7 +129,7 @@ export function ExerciseCard({ exercise, animation }: Props) {
             <Player
               ref={playerRef}
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              component={ExerciseAnimation as any}
+              component={animationComponent as any}
               inputProps={inputProps}
               durationInFrames={180}
               fps={30}

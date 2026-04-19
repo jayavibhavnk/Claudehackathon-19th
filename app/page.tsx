@@ -28,6 +28,7 @@ type ExerciseResult = {
   exercise: PTExercise;
   animation: ExerciseAnimationData | null;
   animationError?: string;
+  demoKey?: string | null;
 };
 
 type Phase =
@@ -312,11 +313,12 @@ export default function Home() {
 
             {/* Cards */}
             <div className="space-y-6">
-              {phase.exercises.map(({ exercise, animation }) => (
+              {phase.exercises.map(({ exercise, animation, demoKey }) => (
                 <ExerciseCard
                   key={exercise.step_number}
                   exercise={exercise}
                   animation={animation}
+                  demoKey={demoKey}
                 />
               ))}
             </div>
