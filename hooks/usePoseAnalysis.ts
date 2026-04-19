@@ -4,28 +4,25 @@ import { useRef, useEffect, useCallback } from 'react'
 import type { PoseResult } from './usePose'
 import type { JointStatus } from './usePose'
 
-// MediaPipe landmark indices
-const MP = {
-  LEFT_SHOULDER: 11, RIGHT_SHOULDER: 12,
-  LEFT_ELBOW: 13,    RIGHT_ELBOW: 14,
-  LEFT_WRIST: 15,    RIGHT_WRIST: 16,
-  LEFT_HIP: 23,      RIGHT_HIP: 24,
-  LEFT_KNEE: 25,     RIGHT_KNEE: 26,
-  LEFT_ANKLE: 27,    RIGHT_ANKLE: 28,
-  LEFT_HIP_BK: 23,   RIGHT_HIP_BK: 24,
-  NOSE: 0,
+export interface ExerciseRules {
+  repAngle: { a: number; b: number; c: number }
+  restAngle: number
+  peakAngle: number
+  goodFormAngle: number
+  inverted: boolean
+  keyJoints: number[]
+  tip?: string
 }
 
 export interface PoseMetrics {
   repCount: number
-  formScore: number          // 0–100
+  formScore: number
   jointStatus: Map<number, JointStatus>
   feedbackText: string
 }
 
 interface RepState {
   phase: 'rest' | 'moving' | 'peak'
-  value: number              // smoothed angle or ratio driving the rep
   smoothed: number
 }
 
@@ -45,112 +42,83 @@ function vis(lm: { visibility?: number }): boolean {
   return (lm.visibility ?? 1) > 0.4
 }
 
-// Compute the primary metric (0–1) and joint highlights for a given exercise position
-function computeMetrics(
+// Normalize angle to 0-1 metric based on rules
+function angleToMetric(angleDeg: number, rules: ExerciseRules): number {
+  const { restAngle, peakAngle, inverted } = rules
+  const range = Math.abs(peakAngle - restAngle)
+  if (range < 5) return 0
+  const progress = inverted
+    ? (restAngle - angleDeg) / range
+    : (angleDeg - restAngle) / range
+  return Math.max(0, Math.min(1, progress))
+}
+
+function formScoreFromAngle(angleDeg: number, rules: ExerciseRules): number {
+  const diff = Math.abs(angleDeg - rules.goodFormAngle)
+  const range = Math.abs(rules.peakAngle - rules.restAngle)
+  return Math.max(0, Math.min(100, Math.round(100 - (diff / range) * 120)))
+}
+
+function computeWithRules(
+  lm: PoseResult['landmarks'],
+  rules: ExerciseRules
+): { metric: number; jointStatus: Map<number, JointStatus>; formScore: number } {
+  const map = new Map<number, JointStatus>()
+  const { a, b, c } = rules.repAngle
+
+  const lmA = lm[a], lmB = lm[b], lmC = lm[c]
+  if (!lmA || !lmB || !lmC || !vis(lmB)) {
+    return { metric: 0, jointStatus: map, formScore: 50 }
+  }
+
+  const angleDeg = angle3(lmA, lmB, lmC)
+  const metric = angleToMetric(angleDeg, rules)
+  const formScore = formScoreFromAngle(angleDeg, rules)
+
+  const status: JointStatus =
+    formScore >= 75 ? 'good' : formScore >= 50 ? 'warn' : 'bad'
+
+  for (const idx of rules.keyJoints) {
+    map.set(idx, idx === b ? status : 'neutral')
+  }
+  map.set(b, status)
+
+  return { metric, jointStatus: map, formScore }
+}
+
+// Fallback when rules haven't loaded yet
+function computeFallback(
   lm: PoseResult['landmarks'],
   position: string
 ): { metric: number; jointStatus: Map<number, JointStatus>; formScore: number } {
   const map = new Map<number, JointStatus>()
-  let metric = 0
-  let formScore = 50
-
-  // Helper: mark a set of joints with a status
-  const mark = (status: JointStatus, ...indices: number[]) => {
-    for (const i of indices) map.set(i, status)
+  // Generic: track left knee angle
+  const H = lm[23], K = lm[25], A = lm[27]
+  if (H && K && A && vis(K)) {
+    const a = angle3(H, K, A)
+    const metric = 1 - a / 180
+    const formScore = Math.min(100, Math.round(metric * 110))
+    const status: JointStatus = formScore > 60 ? 'good' : 'neutral'
+    map.set(25, status); map.set(23, 'neutral'); map.set(27, 'neutral')
+    return { metric, jointStatus: map, formScore }
   }
-
-  if (position.includes('standing') || position.includes('quad') || position.includes('lunge')) {
-    // Knee flexion is the primary metric
-    const R = lm[MP.RIGHT_HIP], Rk = lm[MP.RIGHT_KNEE], Ra = lm[MP.RIGHT_ANKLE]
-    const L = lm[MP.LEFT_HIP], Lk = lm[MP.LEFT_KNEE], La = lm[MP.LEFT_ANKLE]
-
-    if (R && Rk && Ra && vis(Rk)) {
-      const kneeAngle = angle3(R, Rk, Ra)
-      metric = 1 - kneeAngle / 180         // 0 = straight, 1 = fully bent
-      const status: JointStatus = kneeAngle < 70 ? 'good' : kneeAngle < 120 ? 'warn' : 'neutral'
-      mark(status, MP.RIGHT_KNEE, MP.RIGHT_HIP, MP.RIGHT_ANKLE)
-      formScore = Math.min(100, Math.round((1 - kneeAngle / 180) * 120))
-    }
-    if (L && Lk && La && vis(Lk)) {
-      mark('neutral', MP.LEFT_KNEE, MP.LEFT_HIP, MP.LEFT_ANKLE)
-    }
-    // Check spine alignment
-    const nose = lm[MP.NOSE], rHip = lm[MP.RIGHT_HIP]
-    if (nose && rHip) {
-      const lean = Math.abs(nose.x - rHip.x)
-      if (lean > 0.15) mark('warn', MP.LEFT_SHOULDER, MP.RIGHT_SHOULDER)
-    }
-
-  } else if (position.includes('hamstring') || position.includes('seated')) {
-    // Hip hinge / knee extension
-    const H = lm[MP.LEFT_HIP], K = lm[MP.LEFT_KNEE], A = lm[MP.LEFT_ANKLE]
-    if (H && K && A && vis(K)) {
-      const kneeAngle = angle3(H, K, A)
-      metric = kneeAngle / 180             // seated: more extension = more metric
-      const status: JointStatus = kneeAngle > 140 ? 'good' : kneeAngle > 100 ? 'warn' : 'neutral'
-      mark(status, MP.LEFT_KNEE, MP.LEFT_HIP, MP.LEFT_ANKLE)
-      formScore = Math.min(100, Math.round((kneeAngle / 180) * 110))
-    }
-
-  } else if (position.includes('shoulder') || position.includes('arm') || position.includes('rotation')) {
-    // Elbow angle
-    const LS = lm[MP.LEFT_SHOULDER], LE = lm[MP.LEFT_ELBOW], LW = lm[MP.LEFT_WRIST]
-    const RS = lm[MP.RIGHT_SHOULDER], RE = lm[MP.RIGHT_ELBOW], RW = lm[MP.RIGHT_WRIST]
-    if (LS && LE && LW && vis(LE)) {
-      const elbow = angle3(LS, LE, LW)
-      metric = 1 - elbow / 180
-      const status: JointStatus = elbow < 100 ? 'good' : elbow < 140 ? 'warn' : 'neutral'
-      mark(status, MP.LEFT_ELBOW, MP.LEFT_SHOULDER, MP.LEFT_WRIST)
-      formScore = Math.min(100, Math.round((1 - elbow / 180) * 120))
-    }
-    if (RS && RE && RW && vis(RE)) {
-      mark('neutral', MP.RIGHT_ELBOW, MP.RIGHT_SHOULDER, MP.RIGHT_WRIST)
-    }
-
-  } else if (position.includes('bird') || position.includes('dog') || position.includes('prone') || position.includes('floor')) {
-    // Bird dog: arm + leg extension symmetry
-    const RS = lm[MP.RIGHT_SHOULDER], RE = lm[MP.RIGHT_ELBOW], RW = lm[MP.RIGHT_WRIST]
-    const LH = lm[MP.LEFT_HIP], LK = lm[MP.LEFT_KNEE], LA = lm[MP.LEFT_ANKLE]
-    let score = 0; let count = 0
-    if (RS && RE && RW && vis(RE)) {
-      const a = angle3(RS, RE, RW)
-      metric = 1 - a / 180
-      score += metric * 100; count++
-      mark(a < 140 ? 'good' : 'warn', MP.RIGHT_ELBOW, MP.RIGHT_SHOULDER, MP.RIGHT_WRIST)
-    }
-    if (LH && LK && LA && vis(LK)) {
-      const a = angle3(LH, LK, LA)
-      metric = (metric + a / 180) / 2
-      score += (a / 180) * 100; count++
-      mark(a > 140 ? 'good' : 'warn', MP.LEFT_KNEE, MP.LEFT_HIP, MP.LEFT_ANKLE)
-    }
-    if (count > 0) formScore = Math.min(100, Math.round(score / count))
-
-  } else {
-    // Generic: use hip-shoulder distance as proxy for engagement
-    const LS = lm[MP.LEFT_SHOULDER], LH = lm[MP.LEFT_HIP]
-    if (LS && LH) {
-      const dy = Math.abs(LS.y - LH.y)
-      metric = Math.min(1, dy * 2)
-      formScore = Math.round(metric * 90 + 10)
-    }
-  }
-
-  // Clamp
-  formScore = Math.max(0, Math.min(100, formScore))
-  metric = Math.max(0, Math.min(1, metric))
-  return { metric, jointStatus: map, formScore }
+  return { metric: 0, jointStatus: map, formScore: 50 }
 }
 
 export interface PoseAnalysisOptions {
+  exerciseName: string
   exercisePosition: string
+  primaryBodyParts?: string[]
+  formCues?: string[]
   onRepComplete?: (count: number) => void
   onFeedback?: (text: string) => void
   speakFn?: (text: string) => void
 }
 
 export function usePoseAnalysis(poseResult: PoseResult | null, options: PoseAnalysisOptions) {
-  const repStateRef = useRef<RepState>({ phase: 'rest', value: 0, smoothed: 0 })
+  const rulesRef = useRef<ExerciseRules | null>(null)
+  const rulesLoadedRef = useRef(false)
+  const repStateRef = useRef<RepState>({ phase: 'rest', smoothed: 0 })
   const repCountRef = useRef(0)
   const formScoreRef = useRef(50)
   const jointStatusRef = useRef<Map<number, JointStatus>>(new Map())
@@ -158,7 +126,33 @@ export function usePoseAnalysis(poseResult: PoseResult | null, options: PoseAnal
   const lastFeedbackTimeRef = useRef(0)
   const feedbackCooldownRef = useRef(false)
 
-  // Returns current snapshot
+  // Fetch exercise-specific rules from Claude once per exercise
+  useEffect(() => {
+    rulesLoadedRef.current = false
+    rulesRef.current = null
+    repCountRef.current = 0
+    repStateRef.current = { phase: 'rest', smoothed: 0 }
+
+    fetch('/api/exercise-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        exerciseName: options.exerciseName,
+        position: options.exercisePosition,
+        primaryBodyParts: options.primaryBodyParts,
+        formCues: options.formCues,
+      }),
+    })
+      .then(r => r.json())
+      .then((rules: ExerciseRules | null) => {
+        if (rules?.repAngle) {
+          rulesRef.current = rules
+        }
+        rulesLoadedRef.current = true
+      })
+      .catch(() => { rulesLoadedRef.current = true })
+  }, [options.exerciseName])
+
   const getMetrics = useCallback((): PoseMetrics => ({
     repCount: repCountRef.current,
     formScore: formScoreRef.current,
@@ -169,55 +163,51 @@ export function usePoseAnalysis(poseResult: PoseResult | null, options: PoseAnal
   useEffect(() => {
     if (!poseResult || !poseResult.landmarks.length) return
 
-    const { metric, jointStatus, formScore } = computeMetrics(
-      poseResult.landmarks,
-      options.exercisePosition
-    )
+    const { metric, jointStatus, formScore } = rulesRef.current
+      ? computeWithRules(poseResult.landmarks, rulesRef.current)
+      : computeFallback(poseResult.landmarks, options.exercisePosition)
 
-    // Update refs
     jointStatusRef.current = jointStatus
     formScoreRef.current = formScore
 
     // EMA smoothing
     const alpha = 0.7
-    const prev = repStateRef.current.smoothed
-    const smoothed = alpha * metric + (1 - alpha) * prev
+    const smoothed = alpha * metric + (1 - alpha) * repStateRef.current.smoothed
     repStateRef.current.smoothed = smoothed
 
-    // 3-phase rep counter
+    // 3-phase rep counter — thresholds derived from metric range
     const { phase } = repStateRef.current
-    const RISE_THRESH = 0.35
-    const PEAK_THRESH = 0.60
-    const FALL_THRESH = 0.30
+    const RISE = 0.30
+    const PEAK = 0.60
+    const FALL = 0.25
 
-    if (phase === 'rest' && smoothed > RISE_THRESH) {
+    if (phase === 'rest' && smoothed > RISE) {
       repStateRef.current.phase = 'moving'
-    } else if (phase === 'moving' && smoothed > PEAK_THRESH) {
+    } else if (phase === 'moving' && smoothed > PEAK) {
       repStateRef.current.phase = 'peak'
-    } else if (phase === 'peak' && smoothed < FALL_THRESH) {
+    } else if (phase === 'peak' && smoothed < FALL) {
       repStateRef.current.phase = 'rest'
       repCountRef.current += 1
       options.onRepComplete?.(repCountRef.current)
     }
 
-    // Periodic Claude feedback every 6 seconds
+    // Periodic Claude audio feedback every 6s
     const now = Date.now()
-    if (
-      now - lastFeedbackTimeRef.current > 6000 &&
-      !feedbackCooldownRef.current &&
-      options.speakFn
-    ) {
+    if (now - lastFeedbackTimeRef.current > 6000 && !feedbackCooldownRef.current && options.speakFn) {
       lastFeedbackTimeRef.current = now
       feedbackCooldownRef.current = true
 
-      const reps = repCountRef.current
-      const score = formScoreRef.current
-      const pos = options.exercisePosition
-
+      const tip = rulesRef.current?.tip
       fetch('/api/form-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exercisePosition: pos, repCount: reps, formScore: score }),
+        body: JSON.stringify({
+          exercisePosition: options.exercisePosition,
+          exerciseName: options.exerciseName,
+          repCount: repCountRef.current,
+          formScore: formScoreRef.current,
+          tip,
+        }),
       })
         .then(r => r.json())
         .then((data: { feedback: string }) => {
@@ -228,9 +218,7 @@ export function usePoseAnalysis(poseResult: PoseResult | null, options: PoseAnal
           }
         })
         .catch(() => {})
-        .finally(() => {
-          feedbackCooldownRef.current = false
-        })
+        .finally(() => { feedbackCooldownRef.current = false })
     }
   }, [poseResult, options])
 

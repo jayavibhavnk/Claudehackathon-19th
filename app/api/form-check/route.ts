@@ -4,7 +4,7 @@ export const runtime = 'nodejs'
 export const maxDuration = 30
 
 export async function POST(req: NextRequest) {
-  const { exercisePosition, repCount, formScore } = await req.json()
+  const { exercisePosition, exerciseName, repCount, formScore, tip } = await req.json()
   const apiKey = process.env.ANTHROPIC_API_KEY
 
   if (!apiKey) return NextResponse.json({ feedback: '' })
@@ -12,9 +12,9 @@ export async function POST(req: NextRequest) {
   const scoreLabel = formScore >= 80 ? 'excellent' : formScore >= 60 ? 'good' : formScore >= 40 ? 'fair' : 'needs work'
 
   const prompt = `You are a friendly physical therapy coach giving real-time audio feedback.
-Exercise: ${exercisePosition}, Reps done: ${repCount}, Form score: ${formScore}/100 (${scoreLabel})
+Exercise: ${exerciseName ?? exercisePosition}, Reps done: ${repCount}, Form score: ${formScore}/100 (${scoreLabel})${tip ? `\nKey form tip for this exercise: ${tip}` : ''}
 
-Give ONE short sentence of coaching (under 15 words). If score>=80 praise, if 50-79 give a form tip, if <50 give a gentle correction. Sound warm, vary your language.
+Give ONE short sentence of coaching (under 15 words). If score>=80 praise and encourage, if 50-79 mention the form tip, if <50 give a gentle correction. Sound warm, vary your language.
 Return only the sentence, no preamble.`
 
   try {

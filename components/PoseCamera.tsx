@@ -7,7 +7,10 @@ import { usePoseAnalysis } from '@/hooks/usePoseAnalysis'
 interface PoseCameraProps {
   enabled: boolean
   className?: string
+  exerciseName?: string
   exercisePosition?: string
+  primaryBodyParts?: string[]
+  formCues?: string[]
   onRepComplete?: (count: number) => void
   speakFn?: (text: string) => void
 }
@@ -15,7 +18,10 @@ interface PoseCameraProps {
 export function PoseCamera({
   enabled,
   className = '',
+  exerciseName = 'exercise',
   exercisePosition = 'standing',
+  primaryBodyParts,
+  formCues,
   onRepComplete,
   speakFn,
 }: PoseCameraProps) {
@@ -37,7 +43,10 @@ export function PoseCamera({
   }
 
   const { getMetrics } = usePoseAnalysis(poseResult, {
+    exerciseName,
     exercisePosition,
+    primaryBodyParts,
+    formCues,
     onRepComplete: onRep,
     onFeedback,
     speakFn,

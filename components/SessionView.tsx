@@ -206,7 +206,10 @@ export function SessionView({
               <PoseCamera
                 enabled={cameraEnabled}
                 className="w-full h-full"
+                exerciseName={exercise.name}
                 exercisePosition={exercise.position}
+                primaryBodyParts={exercise.primary_body_parts}
+                formCues={exercise.form_cues}
                 speakFn={speakFn}
               />
               <button
