@@ -1,11 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import type { PTExercise } from '@/lib/schemas/pt-exercise'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 function buildSystemPrompt(session: SessionContext | null): string {
   const base = `You are Coach, an encouraging physical therapy voice assistant for Steplet. You speak naturally and concisely.
@@ -54,9 +52,8 @@ ACTION COMMANDS — append to end of response when appropriate:
 [REPEAT] — user says repeat/again/redo → restart current
 [PAUSE] — user says stop/pause/wait/break → pause session
 [COMPLETE] — after [NEXT] on the last exercise (${isLast ? 'THIS IS THE LAST EXERCISE' : `last is exercise ${total}`})
-[START_SESSION] — if user asks to begin/start (in browse mode only)
 
-${mode === 'step-by-step' ? `In step-by-step mode: guide through current exercise, wait for "done" before [NEXT].` : `In all-at-once mode: exercises auto-advance, but user can still ask questions.`}
+${mode === 'step-by-step' ? 'In step-by-step mode: guide through current exercise, wait for "done" before [NEXT].' : 'In all-at-once mode: exercises auto-advance, but user can still ask questions.'}
 ${isLast ? 'This is the FINAL exercise — use [COMPLETE] instead of [NEXT] when they finish.' : ''}`
 }
 
@@ -68,38 +65,29 @@ interface SessionContext {
 }
 
 export async function POST(req: NextRequest) {
-  const { messages, session } = await req.json()
+  try {
+    const { messages, session } = await req.json()
 
-  const encoder = new TextEncoder()
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        const response = await client.messages.create({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 120,
-          system: buildSystemPrompt(session ?? null),
-          messages,
-          stream: true,
-        })
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 120,
+      system: buildSystemPrompt(session ?? null),
+      messages,
+    })
 
-        for await (const event of response) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-            controller.enqueue(encoder.encode(event.delta.text))
-          }
-        }
-        controller.close()
-      } catch (err) {
-        controller.error(err)
-      }
-    },
-  })
+    const text = response.content
+      .filter(b => b.type === 'text')
+      .map(b => (b as { type: 'text'; text: string }).text)
+      .join('')
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Transfer-Encoding': 'chunked',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  })
+    return new NextResponse(text, {
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[/api/voice]', msg)
+    return new NextResponse(msg, { status: 500 })
+  }
 }
