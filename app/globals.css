@@ -2,5 +2,81 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Inter font from Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg: #030712;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Orb animations ─────────────────────────────────────────── */
+@keyframes waveform {
+  0%, 100% { transform: scaleY(0.3); opacity: 0.6; }
+  50%       { transform: scaleY(1);   opacity: 1;   }
+}
+
+@keyframes thinking-dot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40%           { transform: scale(1.2); opacity: 1;   }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1);    opacity: 0.6; }
+  100% { transform: scale(1.35); opacity: 0;   }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+@keyframes spin-cw {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Orb ring styles ────────────────────────────────────────── */
+.orb-ring {
+  border: 1px solid;
+  animation: pulse-ring 2s ease-out infinite;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.orb-spin {
+  border: 1.5px solid transparent;
+  border-top-color: currentColor;
+  animation: spin-cw 1.2s linear infinite;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ── Utility ────────────────────────────────────────────────── */
+.animate-fade-in-up {
+  animation: fade-in-up 0.2s ease;
+}
+
+.bg-white\/3 {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.bg-white\/8 {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Mobile safe areas ──────────────────────────────────────── */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 9999px; }

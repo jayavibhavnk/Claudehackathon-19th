@@ -13,8 +13,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@lottiefiles/dotlottie-react": "^0.19.0",
+    "@mediapipe/tasks-vision": "^0.10.34",
     "@remotion/cli": "^4.0.0",
     "@remotion/player": "^4.0.0",
+    "@tavily/core": "^0.7.2",
     "next": "14.2.35",
     "pdf-parse": "^1.1.1",
     "react": "^18",
